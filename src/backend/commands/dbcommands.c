@@ -83,7 +83,7 @@ typedef enum CreateDBStrategy
 {
 	CREATEDB_WAL_LOG,
 	CREATEDB_FILE_COPY,
-	CREATEDB_COPY_FILE_RANGE,
+	CREATEDB_FILE_COPY_RANGE,
 } CreateDBStrategy;
 
 typedef struct
@@ -138,7 +138,7 @@ static void CreateDirAndVersionFile(char *dbpath, Oid dbid, Oid tsid,
 									bool isRedo);
 static void CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid,
 										Oid src_tsid, Oid dst_tsid,
-										bool range_copy);
+										CopyMethod copy_method);
 static void recovery_create_dbdir(char *path, bool only_tblspc);
 
 /*
@@ -550,7 +550,7 @@ CreateDirAndVersionFile(char *dbpath, Oid dbid, Oid tsid, bool isRedo)
  */
 static void
 CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
-							Oid dst_tsid, bool range_copy)
+							Oid dst_tsid, CopyMethod copy_method)
 {
 	TableScanDesc scan;
 	Relation	rel;
@@ -610,7 +610,7 @@ CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
 		 *
 		 * We don't need to copy subdirectories
 		 */
-		copydir(srcpath, dstpath, false, range_copy);
+		copydir_with_method(srcpath, dstpath, false, copy_method);
 
 		/* Record the filesystem change in XLOG */
 		{
@@ -1025,7 +1025,7 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		else if (pg_strcasecmp(strategy, "file_copy") == 0)
 			dbstrategy = CREATEDB_FILE_COPY;
 		else if (pg_strcasecmp(strategy, "copy_file_range") == 0)
-			dbstrategy = CREATEDB_COPY_FILE_RANGE;
+			dbstrategy = CREATEDB_FILE_COPY_RANGE;
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1512,12 +1512,12 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		if (dbstrategy == CREATEDB_WAL_LOG)
 			CreateDatabaseUsingWalLog(src_dboid, dboid, src_deftablespace,
 									  dst_deftablespace);
-		else if (dbstrategy == CREATEDB_COPY_FILE_RANGE)
+		else if (dbstrategy == CREATEDB_FILE_COPY_RANGE)
 			CreateDatabaseUsingFileCopy(src_dboid, dboid, src_deftablespace,
-										dst_deftablespace, true);
+										dst_deftablespace, COPY_METHOD_COPY_FILE_RANGE);
 		else
 			CreateDatabaseUsingFileCopy(src_dboid, dboid, src_deftablespace,
-										dst_deftablespace, false);
+										dst_deftablespace, COPY_METHOD_COPY);
 
 		/*
 		 * Close pg_database, but keep lock till commit.
@@ -2163,7 +2163,7 @@ movedb(const char *dbname, const char *tblspcname)
 		/*
 		 * Copy files from the old tablespace to the new one
 		 */
-		copydir(src_dbpath, dst_dbpath, false, false);
+		copydir(src_dbpath, dst_dbpath, false);
 
 		/*
 		 * Record the filesystem change in XLOG
@@ -3348,7 +3348,7 @@ dbase_redo(XLogReaderState *record)
 		 *
 		 * We don't need to copy subdirectories
 		 */
-		copydir(src_path, dst_path, false, false);
+		copydir(src_path, dst_path, false);
 
 		pfree(src_path);
 		pfree(dst_path);

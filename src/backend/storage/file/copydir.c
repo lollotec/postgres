@@ -35,7 +35,18 @@
  * a directory or a regular file is ignored.
  */
 void
-copydir(const char *fromdir, const char *todir, bool recurse, bool range_copy)
+copydir(const char *fromdir, const char *todir, bool recurse)
+{
+	copydir_with_method(fromdir, todir, recurse, COPY_METHOD_COPY);
+}
+
+/*
+ * copydir_with_method: copy a directory using a specific copy method
+ *
+ * Method is either a simple copy or a call to copy_file_range.
+ */
+void
+copydir_with_method(const char *fromdir, const char *todir, bool recurse, CopyMethod copy_method)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
@@ -69,12 +80,12 @@ copydir(const char *fromdir, const char *todir, bool recurse, bool range_copy)
 		{
 			/* recurse to handle subdirectories */
 			if (recurse)
-				copydir(fromfile, tofile, true, range_copy);
+				copydir_with_method(fromfile, tofile, true, copy_method);
 		}
 		else if (xlde_type == PGFILETYPE_REG)
 		{
-			if (range_copy)
-				copy_file_reflink(fromfile, tofile);
+			if (copy_method == COPY_METHOD_COPY_FILE_RANGE)
+				copy_file_by_range(fromfile, tofile);
 			else
 				copy_file(fromfile, tofile);
 		}
@@ -225,7 +236,7 @@ copy_file(const char *fromfile, const char *tofile)
   * copy one file using copy_file_range to give filesystem a chance to do COW optimization
   */
 void
-copy_file_reflink(const char *fromfile, const char *tofile)
+copy_file_by_range(const char *fromfile, const char *tofile)
 {
 #if  defined(HAVE_COPY_FILE_RANGE)
 	int			srcfd;
