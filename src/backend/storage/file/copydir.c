@@ -26,6 +26,7 @@
 #include "pgstat.h"
 #include "storage/copydir.h"
 #include "storage/fd.h"
+#include "pg_config.h"
 
 /*
  * copydir: copy a directory
@@ -35,6 +36,17 @@
  */
 void
 copydir(const char *fromdir, const char *todir, bool recurse)
+{
+	copydir_with_method(fromdir, todir, recurse, COPY_METHOD_COPY);
+}
+
+/*
+ * copydir_with_method: copy a directory using a specific copy method
+ *
+ * Method is either a simple copy or a call to copy_file_range.
+ */
+void
+copydir_with_method(const char *fromdir, const char *todir, bool recurse, CopyMethod copy_method)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
@@ -68,10 +80,15 @@ copydir(const char *fromdir, const char *todir, bool recurse)
 		{
 			/* recurse to handle subdirectories */
 			if (recurse)
-				copydir(fromfile, tofile, true);
+				copydir_with_method(fromfile, tofile, true, copy_method);
 		}
 		else if (xlde_type == PGFILETYPE_REG)
-			copy_file(fromfile, tofile);
+		{
+			if (copy_method == COPY_METHOD_COPY_FILE_RANGE)
+				copy_file_by_range(fromfile, tofile);
+			else
+				copy_file(fromfile, tofile);
+		}
 	}
 	FreeDir(xldir);
 
@@ -213,4 +230,64 @@ copy_file(const char *fromfile, const char *tofile)
 				 errmsg("could not close file \"%s\": %m", fromfile)));
 
 	pfree(buffer);
+}
+
+/*
+  * copy one file using copy_file_range to give filesystem a chance to do COW optimization
+  */
+void
+copy_file_by_range(const char *fromfile, const char *tofile)
+{
+#if  defined(HAVE_COPY_FILE_RANGE)
+	int			srcfd;
+	int			dstfd;
+	ssize_t		nbytes;
+
+	/*
+		* Open the files
+		*/
+	srcfd = OpenTransientFile(fromfile, O_RDONLY | PG_BINARY);
+
+	if (srcfd < 0)
+		ereport(ERROR,
+				errcode_for_file_access(),
+				errmsg("could not open file \"%s\": %m", fromfile));
+
+	dstfd = OpenTransientFile(tofile, O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
+
+	if (dstfd < 0)
+		ereport(ERROR,
+				errcode_for_file_access(),
+				errmsg("could not create file \"%s\": %m", tofile));
+
+	/*
+		* Do the data copying.
+		*/
+	do
+	{
+		/* If we got a cancel signal during the copy of the file, quit */
+		CHECK_FOR_INTERRUPTS();
+
+		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
+		nbytes = copy_file_range(srcfd, NULL, dstfd, NULL, SSIZE_MAX, 0);
+		pgstat_report_wait_end();
+		if (nbytes < 0)
+			ereport(ERROR,
+					errcode_for_file_access(),
+					errmsg("could not copy file \"%s\": %m", fromfile));
+	}
+	while (nbytes > 0);
+
+	if (CloseTransientFile(dstfd) != 0)
+		ereport(ERROR,
+				errcode_for_file_access(),
+				errmsg("could not close file \"%s\": %m", tofile));
+
+	if (CloseTransientFile(srcfd) != 0)
+		ereport(ERROR,
+				errcode_for_file_access(),
+				errmsg("could not close file \"%s\": %m", fromfile));
+#else
+	pg_fatal("copy_file_range not available on this platform");
+#endif
 }

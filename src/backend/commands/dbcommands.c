@@ -83,6 +83,7 @@ typedef enum CreateDBStrategy
 {
 	CREATEDB_WAL_LOG,
 	CREATEDB_FILE_COPY,
+	CREATEDB_COPY_FILE_BY_RANGE,
 } CreateDBStrategy;
 
 typedef struct
@@ -136,7 +137,8 @@ static CreateDBRelInfo *ScanSourceDatabasePgClassTuple(HeapTupleData *tuple,
 static void CreateDirAndVersionFile(char *dbpath, Oid dbid, Oid tsid,
 									bool isRedo);
 static void CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid,
-										Oid src_tsid, Oid dst_tsid);
+										Oid src_tsid, Oid dst_tsid,
+										CopyMethod copy_method);
 static void recovery_create_dbdir(char *path, bool only_tblspc);
 
 /*
@@ -548,7 +550,7 @@ CreateDirAndVersionFile(char *dbpath, Oid dbid, Oid tsid, bool isRedo)
  */
 static void
 CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
-							Oid dst_tsid)
+							Oid dst_tsid, CopyMethod copy_method)
 {
 	TableScanDesc scan;
 	Relation	rel;
@@ -608,7 +610,7 @@ CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
 		 *
 		 * We don't need to copy subdirectories
 		 */
-		copydir(srcpath, dstpath, false);
+		copydir_with_method(srcpath, dstpath, false, copy_method);
 
 		/* Record the filesystem change in XLOG */
 		{
@@ -1022,6 +1024,8 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 			dbstrategy = CREATEDB_WAL_LOG;
 		else if (pg_strcasecmp(strategy, "file_copy") == 0)
 			dbstrategy = CREATEDB_FILE_COPY;
+		else if (pg_strcasecmp(strategy, "copy_file_range") == 0)
+			dbstrategy = CREATEDB_COPY_FILE_BY_RANGE;
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1508,9 +1512,12 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		if (dbstrategy == CREATEDB_WAL_LOG)
 			CreateDatabaseUsingWalLog(src_dboid, dboid, src_deftablespace,
 									  dst_deftablespace);
+		else if (dbstrategy == CREATEDB_COPY_FILE_BY_RANGE)
+			CreateDatabaseUsingFileCopy(src_dboid, dboid, src_deftablespace,
+										dst_deftablespace, COPY_METHOD_COPY_FILE_RANGE);
 		else
 			CreateDatabaseUsingFileCopy(src_dboid, dboid, src_deftablespace,
-										dst_deftablespace);
+										dst_deftablespace, COPY_METHOD_COPY);
 
 		/*
 		 * Close pg_database, but keep lock till commit.
