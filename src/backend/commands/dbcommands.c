@@ -83,7 +83,7 @@ typedef enum CreateDBStrategy
 {
 	CREATEDB_WAL_LOG,
 	CREATEDB_FILE_COPY,
-	CREATEDB_FILE_COPY_RANGE,
+	CREATEDB_COPY_FILE_BY_RANGE,
 } CreateDBStrategy;
 
 typedef struct
@@ -1025,7 +1025,7 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		else if (pg_strcasecmp(strategy, "file_copy") == 0)
 			dbstrategy = CREATEDB_FILE_COPY;
 		else if (pg_strcasecmp(strategy, "copy_file_range") == 0)
-			dbstrategy = CREATEDB_FILE_COPY_RANGE;
+			dbstrategy = CREATEDB_COPY_FILE_BY_RANGE;
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1512,7 +1512,7 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		if (dbstrategy == CREATEDB_WAL_LOG)
 			CreateDatabaseUsingWalLog(src_dboid, dboid, src_deftablespace,
 									  dst_deftablespace);
-		else if (dbstrategy == CREATEDB_FILE_COPY_RANGE)
+		else if (dbstrategy == CREATEDB_COPY_FILE_BY_RANGE)
 			CreateDatabaseUsingFileCopy(src_dboid, dboid, src_deftablespace,
 										dst_deftablespace, COPY_METHOD_COPY_FILE_RANGE);
 		else

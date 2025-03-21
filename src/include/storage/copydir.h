@@ -19,7 +19,7 @@
 typedef enum CopyMethod
 {
   COPY_METHOD_COPY,
-	COPY_METHOD_COPY_FILE_RANGE,
+  COPY_METHOD_COPY_FILE_RANGE,
 } CopyMethod;
 
 extern void copydir(const char *fromdir, const char *todir, bool recurse);
